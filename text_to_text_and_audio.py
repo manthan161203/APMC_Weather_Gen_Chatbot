@@ -12,7 +12,8 @@ from utils import (
     convert_text_to_speech           # text → speech
 )
 
-from agent import agent_executor     # LLM agent
+# Import the new invoke function
+from agent import invoke_agent
 
 router = APIRouter()
 
@@ -52,16 +53,22 @@ async def text_to_text_and_audio(
     if not user_text:
         raise HTTPException(status_code=400, detail="Empty text provided")
 
-    # ---------------- Append coordinates if provided -----------------------
-    if lat is not None and lon is not None:
-        user_text += f" (lat: {lat}, lon: {lon})"
-        print("User text with coords:", user_text)
-
-    # ---------------- Run the agent ---------------------------------------
+    # ---------------- Run the agent with session memory ---------------
     try:
-        result = agent_executor.invoke({"input": user_text, "lat": lat, "lon": lon})
+        session_id = request.query_params.get("session_id")
+        if not session_id:
+            session_id = str(uuid.uuid4())
+
+        print(f"Using session ID: {session_id}")
+        print(f"User input: {user_text}")
+        
+        # Use the new invoke function with proper memory
+        result = invoke_agent(session_id, user_text, lat, lon)
         answer_text = result["output"]
-        print("Agent output:", answer_text)
+
+        print("Agent result type:", type(answer_text))
+        print("Agent result:", answer_text)
+
     except Exception as e:
         print("Agent error:", e)
         raise HTTPException(status_code=500, detail=f"Agent error: {e}")
@@ -79,7 +86,6 @@ async def text_to_text_and_audio(
         #             break
 
         # Match allowed language (if any)
-
         if payload.langs:
             matched = False
             for lang in payload.langs:
@@ -90,21 +96,25 @@ async def text_to_text_and_audio(
             if not matched:
                 # Fallback to the first allowed language
                 user_lang = payload.langs[0]
+                print(f"No match found, using fallback language: {user_lang}")
 
-        # if user_lang != "en-IN":
+         # if user_lang != "en-IN":
         #     answer_text = translate_text(
         #         text=answer_text,
         #         target_language_code=user_lang,
         #         source_language_code="en-IN"
         #     )
-
+        
         # Translate if output language is different from expected
-        if detect_text_language(answer_text) != user_lang:
+        detected_answer_lang = detect_text_language(answer_text)
+        print(f"Detected answer language: {detected_answer_lang}")
+        
+        if detected_answer_lang != user_lang:
             try:
                 answer_text = translate_text(
                     text=answer_text,
                     target_language_code=user_lang,
-                    source_language_code=detect_text_language(answer_text)
+                    source_language_code=detected_answer_lang
                 )
                 print("Translated answer text:", answer_text)
             except Exception as e:
@@ -136,5 +146,6 @@ async def text_to_text_and_audio(
         "text": answer_text,
         "audio_url": audio_url,
         "language": user_lang,
-        "audio_filename": audio_filename
+        "audio_filename": audio_filename,
+        "session_id": session_id
     }

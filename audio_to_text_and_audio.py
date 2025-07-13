@@ -12,7 +12,8 @@ from utils import (
     validate_audio_duration          # ensure ≤ 20 sec
 )
 
-from agent import agent_executor     # LLM agent
+# Import the new invoke function
+from agent import invoke_agent
 
 router = APIRouter()
 
@@ -69,20 +70,26 @@ async def upload_audio(
     try:
         user_text = convert_speech_to_text(file_path)
         print("Transcribed text:", user_text)
-
-        if lat is not None and lon is not None:
-            user_text += f" (lat: {lat}, lon: {lon})"
-            print("User text with coords:", user_text)
-
+        
     except Exception as e:
         print("Speech-to-text error:", e)
         raise HTTPException(status_code=500, detail=f"Speech-to-text error: {e}")
 
-    # ---------------- Run the agent -----------------------------------
+    # ---------------- Run the agent with session memory ---------------
     try:
-        agent_result = agent_executor.invoke({"input": user_text, "lat": lat, "lon": lon})
-        answer_text = agent_result["output"]
-        print("Agent output:", answer_text)
+        session_id = request.query_params.get("session_id")
+        if not session_id:
+            session_id = str(uuid.uuid4())
+
+        print(f"Using session ID: {session_id}")
+        
+        # Use the new invoke function with proper memory
+        result = invoke_agent(session_id, user_text, lat, lon)
+        answer_text = result["output"]
+        
+        print("Agent result type:", type(answer_text))
+        print("Agent result:", answer_text)
+
     except Exception as e:
         print("Agent error:", e)
         raise HTTPException(status_code=500, detail=f"Agent error: {e}")
@@ -119,6 +126,13 @@ async def upload_audio(
         print("TTS error:", e)
         raise HTTPException(status_code=500, detail=f"TTS error: {e}")
 
+    # ---------------- Cleanup uploaded file ---------------------------
+    try:
+        os.remove(file_path)
+        print(f"Cleaned up uploaded file: {file_path}")
+    except Exception as e:
+        print(f"Could not remove uploaded file: {e}")
+
     # ---------------- Return response ---------------------------------
     audio_url = str(request.base_url) + f"get-audio/{audio_filename}"
     print("Returning response with audio_url:", audio_url)
@@ -126,5 +140,6 @@ async def upload_audio(
         "text": answer_text,
         "audio_url": audio_url,
         "language": user_lang,
-        "audio_filename": audio_filename
+        "audio_filename": audio_filename,
+        "session_id": session_id
     }
