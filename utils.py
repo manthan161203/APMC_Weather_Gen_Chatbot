@@ -124,12 +124,12 @@ def detect_text_language(text: str) -> str:
 
 def translate_text(text: str, target_language_code: str, source_language_code: str = "auto") -> str:
     """
-    Translate text to target language
+    Translate text to target language, safely chunked to support Sarvam's 1000-char limit.
     
     Args:
         text: Text to translate
-        target_language_code: Target language code
-        source_language_code: Source language code (default: auto-detect)
+        target_language_code: Target language code (e.g., "gu-IN")
+        source_language_code: Source language code (default: auto)
         
     Returns:
         Translated text
@@ -139,30 +139,50 @@ def translate_text(text: str, target_language_code: str, source_language_code: s
     """
     try:
         # Convert language codes to the format expected by Sarvam API
-        def format_language_code(lang_code):
-            if lang_code and not lang_code.endswith('-IN'):
+        def format_language_code(lang_code: str) -> str:
+            if lang_code and not lang_code.endswith("-IN"):
                 return f"{lang_code}-IN"
             return lang_code
-        
+
         formatted_source = format_language_code(source_language_code)
         formatted_target = format_language_code(target_language_code)
-        
-        # If source and target languages are the same, return the original text
+
+        # If source and target are the same, skip translation
         if formatted_source == formatted_target:
             return text
-        
-        translation_result = sarvam_client.text.translate(
-            input=text,
-            source_language_code=formatted_source,
-            target_language_code=formatted_target,
-        )
-        return translation_result.translated_text
+
+        # Split text into chunks of <=1000 characters
+        max_chars = 1000
+        paragraphs = text.split("\n")
+        chunks = []
+        current = ""
+
+        for para in paragraphs:
+            if len(current) + len(para) + 1 <= max_chars:
+                current += para + "\n"
+            else:
+                chunks.append(current.strip())
+                current = para + "\n"
+        if current:
+            chunks.append(current.strip())
+
+        translated_chunks = []
+        for chunk in chunks:
+            result = sarvam_client.text.translate(
+                input=chunk,
+                source_language_code=formatted_source,
+                target_language_code=formatted_target,
+            )
+            translated_chunks.append(result.translated_text.strip())
+
+        return "\n".join(translated_chunks)
+
     except Exception as e:
         raise HTTPException(
-            status_code=500, 
+            status_code=500,
             detail=f"Failed to translate text: {str(e)}"
         )
-
+    
 def translate_location_name_to_english(location_name: str) -> str:
     """
     Translate extracted location name to English and sanitize output
