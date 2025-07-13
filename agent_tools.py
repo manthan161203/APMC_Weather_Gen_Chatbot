@@ -82,16 +82,22 @@ def get_agriculture_prices(city_or_text: str = "", lat: float = None, lon: float
         return f"Error fetching agriculture prices: {str(e)}"
 
 @tool
-def get_common_diseases(city_or_text: str) -> str:
-    """Get common diseases for a location in current season."""
+def get_common_diseases(city_or_text: str = "", lat: float = None, lon: float = None) -> str:
+    """Get common diseases for a location in the current season using city name or coordinates."""
     try:
         time_info = get_current_month_and_year()
         month = time_info["month"]
         year = time_info["year"]
 
-        location = extract_location_from_text(city_or_text, llm)
+        location = city_or_text
+
+        # If city_or_text is empty and lat/lon is provided
+        if not location and lat is not None and lon is not None:
+            from utils import get_district_from_coords
+            location = get_district_from_coords(lat, lon)
+
         if not location:
-            return "Unable to detect location."
+            return "Unable to detect location from input or coordinates."
 
         if is_non_english_text(location):
             location = translate_location_name_to_english(location)
@@ -103,14 +109,19 @@ def get_common_diseases(city_or_text: str) -> str:
         return f"Error detecting seasonal diseases: {str(e)}"
 
 @tool
-def get_current_season_crop_suggestion(city_or_text: str) -> str:
+def get_current_season_crop_suggestion(city_or_text: str = "", lat: float = None, lon: float = None) -> str:
     """Suggest crops suitable for current season in a location."""
     try:
         time_info = get_current_month_and_year()
         month = time_info["month"]
         year = time_info["year"]
 
-        location = extract_location_from_text(city_or_text, llm)
+        # Extract location from city_or_text or fallback to lat/lon
+        location = city_or_text
+        if not location and lat is not None and lon is not None:
+            from utils import get_district_from_coords
+            location = get_district_from_coords(lat, lon)
+
         if not location:
             return "Unable to detect location."
 
