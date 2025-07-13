@@ -1,21 +1,25 @@
+# audio_to_text_and_audio.py
+
 from fastapi import APIRouter, UploadFile, File, HTTPException, Request
 from fastapi.responses import FileResponse
 import os, uuid, shutil
-from pydub import AudioSegment
 
 from utils import (
     convert_speech_to_text,          # speech → text
     convert_text_to_speech,          # text → speech
-    detect_text_language,            # language detection
-    translate_text,                  # translation
-    validate_audio_duration,         # check ≤ 20 s
+    detect_text_language,            # detect language
+    translate_text,                  # translate response
+    validate_audio_duration          # ensure ≤ 20 sec
 )
 
-from agent import agent_executor
+from agent import agent_executor     # LLM agent
 
 router = APIRouter()
 
-@router.get("/get-audio/{filename}")
+# ---------------------------------------------------------------------
+# GET /get-audio/{filename} → Serve generated MP3 file
+# ---------------------------------------------------------------------
+@router.get("/get-audio/{filename}", tags=["Audio to Text and Audio"])
 def get_audio(filename: str):
     audio_path = os.path.join("outputs", filename)
     if not os.path.exists(audio_path):
@@ -28,9 +32,9 @@ def get_audio(filename: str):
     )
 
 # ---------------------------------------------------------------------
-# Upload audio → transcribe → run agent → TTS → return answer + MP3 URL
+# POST /audio → transcribe → run agent → TTS → return response + audio
 # ---------------------------------------------------------------------
-@router.post("/audio")
+@router.post("/audio", tags=["Audio to Text and Audio"])
 async def upload_audio(
     request: Request,
     audio_file: UploadFile = File(...),
@@ -39,7 +43,7 @@ async def upload_audio(
 ):
     print("Received audio upload request")
 
-    # Validate & save upload 
+    # ---------------- Validate and save uploaded file -----------------------
     if not (audio_file.filename.endswith(".mp3") or audio_file.filename.endswith(".wav")):
         print("Invalid file type:", audio_file.filename)
         raise HTTPException(status_code=400, detail="Only .mp3 or .wav files are allowed")
@@ -53,7 +57,7 @@ async def upload_audio(
     finally:
         audio_file.file.close()
 
-    # duration ≤ 20 s ?
+    # ---------------- Check duration limit ----------------------------
     if not validate_audio_duration(file_path):
         print("Audio duration exceeds 20 seconds")
         raise HTTPException(
@@ -66,7 +70,6 @@ async def upload_audio(
         user_text = convert_speech_to_text(file_path)
         print("Transcribed text:", user_text)
 
-        # NEW: append coordinates (if supplied) so the LLM sees them too
         if lat is not None and lon is not None:
             user_text += f" (lat: {lat}, lon: {lon})"
             print("User text with coords:", user_text)
@@ -84,10 +87,11 @@ async def upload_audio(
         print("Agent error:", e)
         raise HTTPException(status_code=500, detail=f"Agent error: {e}")
 
-    # ---------------- Preserve the user’s language --------------------
+    # ---------------- Detect language and optionally translate --------
     try:
         user_lang = detect_text_language(user_text)
         print("Detected user language:", user_lang)
+
         if user_lang != "en-IN":
             answer_text = translate_text(
                 text=answer_text,
@@ -95,9 +99,9 @@ async def upload_audio(
                 source_language_code="en-IN"
             )
             print("Translated answer text:", answer_text)
+
     except Exception as e:
         print("Language detection/translation failed:", e)
-        # If language detection or translation fails, fall back to English
         user_lang = "en-IN"
 
     # ---------------- Text → speech -----------------------------------
@@ -115,7 +119,12 @@ async def upload_audio(
         print("TTS error:", e)
         raise HTTPException(status_code=500, detail=f"TTS error: {e}")
 
-    # ---------------- Return JSON -------------------------------------
+    # ---------------- Return response ---------------------------------
     audio_url = str(request.base_url) + f"get-audio/{audio_filename}"
     print("Returning response with audio_url:", audio_url)
-    return {"text": answer_text, "audio_url": audio_url, "language": user_lang, "audio_filename": audio_filename}
+    return {
+        "text": answer_text,
+        "audio_url": audio_url,
+        "language": user_lang,
+        "audio_filename": audio_filename
+    }
